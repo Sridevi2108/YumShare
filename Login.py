@@ -71,12 +71,10 @@ def check_login():
             db.close()
 
 
-# Window
 root = Tk()
 root.geometry("700x500+300+150")
 root.title("Login System")
 
-# Background
 image_0 = Image.open('bg1.jpg')
 bck_pic = ImageTk.PhotoImage(image_0.resize((700, 500)))
 
@@ -89,7 +87,6 @@ frame.place(relx=0.5, rely=0.5, anchor=CENTER)
 heading = Label(frame, text='Sign in', fg='#57a1f8', bg='floral white', font=('Calibre', 23, 'bold'))
 heading.pack(pady=10)
 
-# User section
 uservalue = StringVar()
 user = Entry(frame, textvariable=uservalue, width=25, fg='grey', border=1, bg='white', font=('Harrington', 11, 'bold'))
 user.insert(0, 'Username')
@@ -99,7 +96,6 @@ user.pack(pady=10)
 
 Frame(frame, width=295, height=2, bg='black').pack(pady=5)
 
-# Password section
 codevalue = StringVar()
 code = Entry(frame, textvariable=codevalue, width=25, fg='grey', border=1, bg='white', font=('Harrington', 11, 'bold'))
 code.insert(0, 'Password')
@@ -109,7 +105,6 @@ code.pack(pady=10)
 
 Frame(frame, width=295, height=2, bg='black').pack(pady=5)
 
-# Buttons
 Button(frame, width=30, pady=7, text='Sign in', bg='#57a1f8', fg='white', cursor='hand2', border=0,
        command=check_login).pack(pady=20)
 
