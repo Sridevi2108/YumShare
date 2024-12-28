@@ -11,6 +11,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.popup import Popup
 from plyer import filechooser
 import os
+from kivy.app import App
 
 class UploadRecipe(Screen):
     def __init__(self, **kwargs):
@@ -100,6 +101,10 @@ class UploadRecipe(Screen):
         layout.add_widget(steps_ingredients_layout)
         root_layout.add_widget(scroll_view)
         self.add_widget(root_layout)
+
+    def on_enter(self):
+        """Reset the input fields and image preview when the screen is entered."""
+        self.reset_fields()
 
     def go_back(self, instance):
         """Navigate back to the main page or previous screen."""
@@ -192,14 +197,30 @@ class UploadRecipe(Screen):
         else:
             image_data = None
 
+        # Fetch the user_id from the App instance
+        user_id = App.get_running_app().user_id
+
         # Insert recipe data into the database
         self.cursor.execute('''INSERT INTO recipes (user_id, title, ingredients, steps, image, serving_size, cook_time)
                                VALUES (%s, %s, %s, %s, %s, %s, %s)''',
-                            (1, title, ingredients, steps, image_data, serving_size, cook_time))  # Replace 1 with the actual user_id
+                            (user_id, title, ingredients, steps, image_data, serving_size, cook_time))
         self.conn.commit()
 
         # Show popup message
         self.show_popup("Recipe uploaded successfully")
+
+        # Clear the input fields and image preview
+        self.reset_fields()
+
+    def reset_fields(self):
+        """Reset all input fields and image preview."""
+        self.title_input.text = ''
+        self.serving_size_input.text = ''
+        self.cook_time_input.text = ''
+        self.image_preview.source = ''
+        self.image_path = None
+        self.ingredients_layout.clear_widgets()
+        self.steps_list.clear_widgets()
 
     def show_popup(self, message):
         popup_layout = BoxLayout(orientation='vertical', padding=10, spacing=10)

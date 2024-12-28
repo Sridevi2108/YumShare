@@ -105,8 +105,8 @@ class MainPage(Screen):
             ('Home', 'homepic.png', self.mainscreen),
             ('Search Recipe', 'search-icon.png', self.mainscreen),
             ('Upload Recipe', 'upload_icon.png', self.go_to_upload_recipe),
-            ('Favourites', 'favourite_icon.png', self.mainscreen),
-            ('Your Recipes', 'your_recipes.png', self.mainscreen),
+            ('Favourites', 'favourite_icon.png', self.go_to_favourites),
+            ('Your Recipes', 'your_recipes.png', self.go_to_your_recipes),
             ('Profile', 'user_img.png', self.go_to_profile),
         ]
 
@@ -160,6 +160,10 @@ class MainPage(Screen):
         # Reset the main content area to display recent recipes
         self.fetch_and_display_recipes()
 
+    def go_to_your_recipes(self, instance):
+        if self.screen_manager:
+            self.screen_manager.current = 'your_recipes'
+
     def go_to_upload_recipe(self, instance):
         if self.screen_manager:
             self.screen_manager.current = 'upload_recipe'
@@ -169,6 +173,14 @@ class MainPage(Screen):
             view_recipe_screen = self.screen_manager.get_screen('view_recipe')
             view_recipe_screen.display_recipe(recipe_id)
             self.screen_manager.current = 'view_recipe'
+
+
+    def go_to_favourites(self, instance):
+        """Navigate to the Favourites screen."""
+        if self.screen_manager:
+            favourites_screen = self.screen_manager.get_screen('favourites')
+            favourites_screen.set_user_id(App.get_running_app().user_id)
+            self.screen_manager.current = 'favourites'
 
     def go_to_profile(self, instance):
         """Navigate to the profile screen with user info."""
@@ -253,7 +265,11 @@ class MainPage(Screen):
         recipe_id, title, ingredients, steps, image_data = recipe
 
         # Recipe container
-        recipe_container = BoxLayout(orientation='vertical', padding=10, spacing=10, size_hint=(1, None), height=300)
+        recipe_container = BoxLayout(orientation='vertical', padding=10, spacing=10, size_hint=(1, None), height=350)
+
+        # Add user name above the image
+        recipe_container.add_widget(
+            Label(text="User Name", font_size='14sp', halign='center', size_hint_y=None, height=30))
 
         # Display image if available
         if image_data:
@@ -267,7 +283,7 @@ class MainPage(Screen):
         # Add title below the image
         recipe_container.add_widget(Label(text=title, font_size='16sp', halign='center', size_hint_y=None, height=30))
 
-        # Add buttons below the image
+        # Add buttons below the title
         buttons_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=50, spacing=10)
         like_button = Button(text='Like', size_hint_x=None, width=80)
         like_button.bind(on_press=lambda instance: self.like_recipe(recipe_id, title))
@@ -279,14 +295,8 @@ class MainPage(Screen):
         buttons_layout.add_widget(comment_button)
         buttons_layout.add_widget(view_button)
 
-        buttons_layout.size_hint_x = 0.9  # Ensure the buttons layout is centered
-        buttons_layout.pos_hint = {'center_x': 0.5}
-
         recipe_container.add_widget(buttons_layout)
         self.recipes_layout.add_widget(recipe_container)
-
-        # Display comments below the buttons
-        self.display_comments(recipe_id, recipe_container)
 
     def on_window_resize(self, instance, width, height):
         """Adjust layout dynamically when the window is resized."""
