@@ -179,28 +179,29 @@ class ProfileScreen(Screen):
 
         cursor = db.cursor()
         try:
-            cursor.execute("SELECT name, email, phone FROM users WHERE id = %s", (self.user_id,))
+            cursor.execute("SELECT name, email, phone, profile_photo, bio, hobby FROM users WHERE id = %s",
+                           (self.user_id,))
             user_info = cursor.fetchone()
-            cursor.fetchall()
-
-            cursor.execute("SELECT profile_photo, bio, hobby FROM user_profiles WHERE user_id = %s", (self.user_id,))
-            profile_info = cursor.fetchone()
-            cursor.fetchall()
 
             if user_info:
-                name, email, phone = user_info
+                name, email, phone, profile_photo, bio, hobby = user_info
                 self.name_label.text = f"Name: {name}"
                 self.email_label.text = f"Email: {email}"
                 self.phone_label.text = f"Phone: {phone}"
+                self.bio_label.text = f"Bio: {bio}"
+                self.hobby_label.text = f"Hobby: {hobby}"
 
-            if profile_info:
-                profile_photo, bio, hobby = profile_info
                 if profile_photo:
                     image_stream = BytesIO(profile_photo)
                     core_image = CoreImage(image_stream, ext="png")
                     self.profile_image.texture = core_image.texture
-                self.bio_label.text = f"Bio: {bio}"
-                self.hobby_label.text = f"Hobby: {hobby}"
+            else:
+                # Clear labels if no data is found
+                self.name_label.text = "Name: "
+                self.email_label.text = "Email: "
+                self.phone_label.text = "Phone: "
+                self.bio_label.text = "Bio: "
+                self.hobby_label.text = "Hobby: "
 
         except mysql.connector.Error as err:
             print(f"Error: {err}")
@@ -286,10 +287,6 @@ class ProfileScreen(Screen):
                 image.save(image_byte_array, format='PNG')
                 profile_photo = image_byte_array.getvalue()
 
-        # Debugging Statement: Print the sizes of the image and the byte array
-        if profile_photo:
-            print(f"Profile photo size: {len(profile_photo)} bytes")
-
         db = self.connect_to_database()
         if db is None:
             print("Failed to connect to the database.")
@@ -297,20 +294,20 @@ class ProfileScreen(Screen):
 
         cursor = db.cursor()
         try:
-            cursor.execute("UPDATE users SET email = %s, phone = %s WHERE id = %s",
-                           (email, phone, self.user_id))
-            if profile_photo:
-                cursor.execute("""
-                    INSERT INTO user_profiles (user_id, profile_photo, bio, hobby)
-                    VALUES (%s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE profile_photo = VALUES(profile_photo), bio = VALUES(bio), hobby = VALUES(hobby)
-                """, (self.user_id, profile_photo, bio, hobby))
+            cursor.execute("SELECT COUNT(*) FROM users WHERE id = %s", (self.user_id,))
+            user_exists = cursor.fetchone()[0] > 0
+
+            if user_exists:
+                cursor.execute("UPDATE users SET email = %s, phone = %s, bio = %s, hobby = %s WHERE id = %s",
+                               (email, phone, bio, hobby, self.user_id))
+                if profile_photo:
+                    cursor.execute("UPDATE users SET profile_photo = %s WHERE id = %s",
+                                   (profile_photo, self.user_id))
             else:
                 cursor.execute("""
-                    INSERT INTO user_profiles (user_id, bio, hobby)
-                    VALUES (%s, %s, %s)
-                    ON DUPLICATE KEY UPDATE bio = VALUES(bio), hobby = VALUES(hobby)
-                """, (self.user_id, bio, hobby))
+                    INSERT INTO users (id, email, phone, bio, hobby, profile_photo)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (self.user_id, email, phone, bio, hobby, profile_photo))
 
             db.commit()
             self.popup.dismiss()
@@ -356,7 +353,6 @@ class ProfileScreen(Screen):
         finally:
             cursor.close()
             db.close()
-
     def connect_to_database(self):
         try:
             return mysql.connector.connect(
