@@ -18,17 +18,20 @@ def search_recipes(ingredients=None, serving_size=None, cook_time=None):
         return []
 
     cursor = db.cursor()
-    query = "SELECT id, title, ingredients, steps, image FROM recipes WHERE 1=1"
+    query = """
+        SELECT recipes.id, recipes.title, recipes.ingredients, recipes.steps, recipes.image, users.name, (SELECT COUNT(*) FROM likes WHERE likes.recipe_id = recipes.id) 
+        AS likes FROM recipes JOIN users ON recipes.user_id = users.id WHERE 1=1
+    """
     params = []
 
     if ingredients:
-        query += " AND ingredients LIKE %s"
-        params.append(f"%{ingredients}%")
+        query += " AND ingredients REGEXP %s"
+        params.append(f'\\b{ingredients}\\b')
     if serving_size:
-        query += " AND serving_size = %s"
+        query += " AND recipes.serving_size = %s"
         params.append(serving_size)
     if cook_time:
-        query += " AND cook_time <= %s"
+        query += " AND recipes.cook_time <= %s"
         params.append(cook_time)
 
     try:

@@ -1,167 +1,369 @@
-from kivy.app import App
-from kivy.uix.screenmanager import Screen
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
-from kivy.uix.image import Image
-from kivy.uix.button import Button
-from kivy.clock import mainthread
-import mysql.connector
-from io import BytesIO
-from kivy.core.image import Image as CoreImage
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
 import os
+from kivy.app import App
+from kivy.uix.screenmanager import Screen, ScreenManager
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.label import Label
+from kivy.uix.textinput import TextInput
+from kivy.uix.button import Button
+from kivy.uix.image import Image
+from kivy.uix.popup import Popup
+from fpdf import FPDF
+import mysql.connector
+from PIL import Image as PILImage
+
+
+class RecipePopup(Popup):
+    def __init__(self, recipe_details, comments, **kwargs):
+        super().__init__(**kwargs)
+        self.recipe_details = recipe_details
+        self.comments = comments
+        self.title = f"{recipe_details['title']} - Comments"
+        self.size_hint = (0.9, 0.8)
+
+        # Main layout of the popup
+        self.popup_layout = BoxLayout(orientation='horizontal', spacing=10, padding=10)
+
+        # Left side: Image
+        if recipe_details['image']:
+            temp_image_path = f'temp_popup_image_{recipe_details["id"]}.png'
+            with open(temp_image_path, 'wb') as f:
+                f.write(recipe_details['image'])
+            self.popup_layout.add_widget(Image(source=temp_image_path, size_hint=(0.5, 1)))
+
+        # Right side: Details and comments
+        self.right_layout = BoxLayout(orientation='vertical', spacing=10)
+        self.right_layout.add_widget(Label(
+            text=f"[b]{recipe_details['title']}[/b]", markup=True, font_size=18
+        ))
+
+        # Comments section in a scrollable view
+        self.comments_box = ScrollView(size_hint=(1, 0.7))
+        self.comments_layout = BoxLayout(orientation='vertical', size_hint_y=None)
+        self.comments_layout.bind(minimum_height=self.comments_layout.setter('height'))
+        self.load_comments()
+        self.comments_box.add_widget(self.comments_layout)
+        self.right_layout.add_widget(self.comments_box)
+
+        # Add comment input field and button
+        self.comment_input = TextInput(hint_text="Add your comment here...", size_hint_y=None, height=40)
+        self.post_comment_btn = Button(text="Post Comment", size_hint_y=None, height=40)
+        self.post_comment_btn.bind(on_press=self.post_comment)
+        self.right_layout.add_widget(self.comment_input)
+        self.right_layout.add_widget(self.post_comment_btn)
+
+        # Add back button
+        back_btn = Button(text="Back", size_hint_y=None, height=40)
+        back_btn.bind(on_press=self.dismiss)
+        self.right_layout.add_widget(back_btn)
+
+        self.popup_layout.add_widget(self.right_layout)
+        self.add_widget(self.popup_layout)
+
+    def load_comments(self):
+        """Load comments into the comments layout."""
+        self.comments_layout.clear_widgets()
+        app = App.get_running_app()
+        for comment in self.comments:
+            comment_box = BoxLayout(orientation='horizontal', size_hint_y=None, height=30, spacing=10)
+            comment_label = Label(
+                text=f"{comment['username']}: {comment['comment']}",
+                font_size=14, size_hint_x=0.7
+            )
+            comment_box.add_widget(comment_label)
+            # Only show edit and delete buttons for the user's own comments
+            if comment['user_id'] == app.user_id:
+                edit_btn = Button(text="Edit", size_hint_x=0.15)
+                edit_btn.bind(on_press=lambda instance, c=comment: self.edit_comment(c))
+                delete_btn = Button(text="Delete", size_hint_x=0.15)
+                delete_btn.bind(on_press=lambda instance, c=comment: self.delete_comment(c))
+                comment_box.add_widget(edit_btn)
+                comment_box.add_widget(delete_btn)
+            self.comments_layout.add_widget(comment_box)
+
+    def post_comment(self, instance):
+        """Post a new comment to the database."""
+        comment_text = self.comment_input.text.strip()
+        if comment_text:
+            try:
+                connection = mysql.connector.connect(
+                    host='localhost', user='root', password='password', database='yumshare'
+                )
+                cursor = connection.cursor()
+                app = App.get_running_app()
+                query = "INSERT INTO comments (user_id, recipe_id, username, comment) VALUES (%s, %s, %s, %s)"
+                cursor.execute(query, (app.user_id, self.recipe_details['id'], app.username, comment_text))
+                connection.commit()
+                connection.close()
+                self.comment_input.text = ""  # Clear the input field
+                print("Comment posted successfully!")
+
+                # Refresh comments
+                self.refresh_comments()
+            except Exception as e:
+                print(f"Error posting comment: {e}")
+
+    def edit_comment(self, comment):
+        """Edit an existing comment."""
+        app = App.get_running_app()
+        if comment['user_id'] != app.user_id:
+            print("You can only edit your own comments.")
+            return
+
+        edit_popup = Popup(title="Edit Comment", size_hint=(0.8, 0.4))
+        content = BoxLayout(orientation='vertical', padding=10)
+
+        comment_input = TextInput(text=comment['comment'], size_hint_y=None, height=40)
+        save_btn = Button(text="Save", size_hint_y=None, height=40)
+        cancel_btn = Button(text="Cancel", size_hint_y=None, height=40)
+
+        def save_edit(instance):
+            new_comment = comment_input.text.strip()
+            if new_comment:
+                try:
+                    connection = mysql.connector.connect(
+                        host='localhost', user='root', password='password', database='yumshare'
+                    )
+                    cursor = connection.cursor()
+                    query = "UPDATE comments SET comment = %s WHERE id = %s"
+                    cursor.execute(query, (new_comment, comment['id']))
+                    connection.commit()
+                    connection.close()
+                    print("Comment updated successfully!")
+                    edit_popup.dismiss()
+                    self.refresh_comments()
+                except Exception as e:
+                    print(f"Error updating comment: {e}")
+
+        save_btn.bind(on_press=save_edit)
+        cancel_btn.bind(on_press=edit_popup.dismiss)
+
+        content.add_widget(comment_input)
+        content.add_widget(save_btn)
+        content.add_widget(cancel_btn)
+        edit_popup.content = content
+        edit_popup.open()
+
+    def delete_comment(self, comment):
+        """Delete an existing comment."""
+        app = App.get_running_app()
+        if comment['user_id'] != app.user_id:
+            print("You can only delete your own comments.")
+            return
+
+        try:
+            connection = mysql.connector.connect(
+                host='localhost', user='root', password='password', database='yumshare'
+            )
+            cursor = connection.cursor()
+            query = "DELETE FROM comments WHERE id = %s"
+            cursor.execute(query, (comment['id'],))
+            connection.commit()
+            connection.close()
+            print("Comment deleted successfully!")
+            self.refresh_comments()
+        except Exception as e:
+            print(f"Error deleting comment: {e}")
+
+    def refresh_comments(self):
+        """Refresh the comments section after posting a new comment."""
+        try:
+            connection = mysql.connector.connect(
+                host='localhost', user='root', password='password', database='yumshare'
+            )
+            cursor = connection.cursor(dictionary=True)
+            query = "SELECT id, user_id, username, comment FROM comments WHERE recipe_id = %s ORDER BY created_at ASC"
+            cursor.execute(query, (self.recipe_details['id'],))
+            self.comments = cursor.fetchall()
+            connection.close()
+            self.load_comments()  # Reload comments into the layout
+        except Exception as e:
+            print(f"Error refreshing comments: {e}")
+
 
 class ViewRecipe(Screen):
     def __init__(self, **kwargs):
-        super(ViewRecipe, self).__init__(**kwargs)
-        self.layout = BoxLayout(orientation='vertical', padding=20, spacing=20)
+        super().__init__(**kwargs)
+        self.recipe_id = None  # Store the ID of the recipe being viewed
+        self.layout = None  # Main layout for the screen
 
-        # Labels to display recipe details
-        self.title_label = Label(text='Title', font_size='24sp', size_hint_y=None, height=40)
-        self.layout.add_widget(self.title_label)
+    def set_recipe_id(self, recipe_id):
+        self.recipe_id = recipe_id  # Set the current recipe ID
+        self.clear_widgets()  # Clear existing widgets before adding new ones
 
-        self.recipe_image = Image(size_hint=(1, None), height=300, source='default_image.png')  # Default image
-        self.layout.add_widget(self.recipe_image)
-
-        self.ingredients_label = Label(text='Ingredients', font_size='16sp', size_hint_y=None, height=40)
-        self.layout.add_widget(self.ingredients_label)
-
-        self.steps_label = Label(text='Steps', font_size='16sp', size_hint_y=None, height=40)
-        self.layout.add_widget(self.steps_label)
-
-        self.serving_label = Label(text='Serving Size', font_size='16sp', size_hint_y=None, height=40)
-        self.layout.add_widget(self.serving_label)
-
-        self.cook_time_label = Label(text='Cook Time', font_size='16sp', size_hint_y=None, height=40)
-        self.layout.add_widget(self.cook_time_label)
-
-        # Button to generate PDF
-        self.generate_pdf_button = Button(text="Generate PDF", size_hint=(None, None), size=(200, 50))
-        self.generate_pdf_button.bind(on_press=self.generate_pdf)
-        self.layout.add_widget(self.generate_pdf_button)
-
+        self.layout = BoxLayout(orientation='vertical', spacing=10, padding=10)
         self.add_widget(self.layout)
 
-    def display_recipe(self, recipe_id):
-        """Display the recipe details and fetch them from the database."""
-        db = self.connect_to_database()
-        if db is None:
-            print("Failed to connect to the database.")
-            return
+        # Load recipe details and UI elements
+        self.load_recipe_details()
+        self.add_view_comments_button()
+        self.add_download_button()
+        self.add_back_button()
 
-        cursor = db.cursor()
+    def load_recipe_details(self):
         try:
-            cursor.execute(
-                f"SELECT title, ingredients, steps, serving_size, cook_time, image FROM recipes WHERE id = {recipe_id}")
+            connection = mysql.connector.connect(
+                host='localhost', user='root', password='password', database='yumshare'
+            )
+            cursor = connection.cursor(dictionary=True)
+
+            # Fetch recipe details using the recipe ID
+            query = "SELECT title, ingredients, steps, image, cook_time, serving_size FROM recipes WHERE id = %s"
+            cursor.execute(query, (self.recipe_id,))
             recipe = cursor.fetchone()
+            connection.close()
 
             if recipe:
-                title, ingredients, steps, serving_size, cook_time, image_data = recipe
-                self.update_labels(title, ingredients, steps, serving_size, cook_time)
+                # Display the recipe title
+                self.layout.add_widget(Label(
+                    text=f"[b]{recipe['title']}[/b]", markup=True, font_size=24
+                ))
 
-                if image_data:
-                    image_stream = BytesIO(image_data)
-                    try:
-                        core_image = CoreImage(image_stream, ext="png")
-                        self.recipe_image.texture = core_image.texture
-                    except Exception as e:
-                        print(f"Error loading image: {e}")
-                        self.recipe_image.source = 'default_image.png'
-                else:
-                    self.recipe_image.source = 'default_image.png'
+                # Display the recipe image if available
+                if recipe['image']:
+                    temp_image_path = f'temp_recipe_image_{self.recipe_id}.png'
+                    with open(temp_image_path, 'wb') as f:
+                        f.write(recipe['image'])
+                    self.layout.add_widget(Image(source=temp_image_path, size_hint=(1, None), height=300))
 
+                # Display ingredients, steps, cooking time, and serving size
+                self.layout.add_widget(Label(
+                    text=f"Ingredients:\n{recipe['ingredients']}", font_size=16
+                ))
+                self.layout.add_widget(Label(
+                    text=f"Steps:\n{recipe['steps']}", font_size=16
+                ))
+                self.layout.add_widget(Label(
+                    text=f"Cooking Time: {recipe['cook_time']} mins", font_size=16
+                ))
+                self.layout.add_widget(Label(
+                    text=f"Serving Size: {recipe['serving_size']}", font_size=16
+                ))
             else:
-                print("Recipe not found.")
-        except mysql.connector.Error as err:
-            print(f"Error: {err}")
-        finally:
-            cursor.close()
-            db.close()
+                # Show error if recipe is not found
+                self.layout.add_widget(Label(text="Recipe not found.", font_size=18))
+        except Exception as e:
+            # Handle errors while loading recipe details
+            self.layout.add_widget(Label(text="Failed to load recipe details.", font_size=18))
+            print(f"Error: {e}")
 
-    def update_labels(self, title, ingredients, steps, serving_size, cook_time):
-        """Update the labels with the recipe details."""
-        self.title_label.text = title if title else "Not available"
-        self.ingredients_label.text = f"Ingredients: {ingredients}" if ingredients else "Not available"
-        self.steps_label.text = f"Steps: {steps}" if steps else "Not available"
-        self.serving_label.text = f"Serving Size: {serving_size}" if serving_size else "Not available"
-        self.cook_time_label.text = f"Cook Time: {cook_time} minutes" if cook_time else "Not available"
+    def add_view_comments_button(self):
+        # Button to open the comments popup
+        view_comments_btn = Button(text="View Comments", size_hint_y=None, height=40)
+        view_comments_btn.bind(on_press=self.open_comments_popup)
+        self.layout.add_widget(view_comments_btn)
 
-    def connect_to_database(self):
-        """Connect to the MySQL database."""
+    def open_comments_popup(self, instance):
         try:
-            return mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="password",
-                database="yumshare"
+            connection = mysql.connector.connect(
+                host='localhost', user='root', password='password', database='yumshare'
             )
-        except mysql.connector.Error as err:
-            print(f"Error: {err}")
-            return None
+            cursor = connection.cursor(dictionary=True)
 
-    def generate_pdf(self, instance):
-        """Generate the PDF file with the recipe details."""
-        title = self.title_label.text
-        ingredients = self.ingredients_label.text
-        steps = self.steps_label.text
-        serving_size = self.serving_label.text
-        cook_time = self.cook_time_label.text
+            # Fetch comments for the current recipe
+            query = "SELECT id, user_id, username, comment FROM comments WHERE recipe_id = %s ORDER BY created_at ASC"
+            cursor.execute(query, (self.recipe_id,))
+            comments = cursor.fetchall()
 
-        # Check if any of the fields are "Not available"
-        if "Not available" in [title, ingredients, steps, serving_size, cook_time]:
-            print("Some recipe details are missing, cannot generate PDF.")
-            return
+            # Fetch recipe details for the popup header
+            query = "SELECT title, image FROM recipes WHERE id = %s"
+            cursor.execute(query, (self.recipe_id,))
+            recipe_details = cursor.fetchone()
 
-        # Set the PDF file path (you can adjust the path and filename as needed)
-        pdf_filename = os.path.join(os.getcwd(), f"{title}_recipe.pdf")
+            connection.close()
 
-        # Create a canvas for the PDF
-        c = canvas.Canvas(pdf_filename, pagesize=letter)
-        width, height = letter
+            if recipe_details:
+                recipe_details['id'] = self.recipe_id
+                popup = RecipePopup(recipe_details, comments)
+                popup.open()
+        except Exception as e:
+            print(f"Error fetching comments: {e}")
 
-        # Title
-        c.setFont("Helvetica-Bold", 18)
-        c.drawString(50, height - 50, f"Recipe: {title}")
+    def add_download_button(self):
+        # Button to download the recipe as a PDF
+        download_btn = Button(text="Download Recipe as PDF", size_hint_y=None, height=40)
+        download_btn.bind(on_press=self.download_recipe)
+        self.layout.add_widget(download_btn)
 
-        # Image (if any)
-        image_path = "default_image.png"  # Default image if no image is available
-        if self.recipe_image.texture:
-            # Save the texture as a temporary image file (to be able to load it for PDF)
-            self.recipe_image.texture.save("temp_image.png")
-            image_path = "temp_image.png"
+    def download_recipe(self, instance):
+        try:
+            connection = mysql.connector.connect(
+                host='localhost', user='root', password='password', database='yumshare'
+            )
+            cursor = connection.cursor(dictionary=True)
+            query = "SELECT title, ingredients, steps, cook_time, serving_size, image FROM recipes WHERE id = %s"
+            cursor.execute(query, (self.recipe_id,))
+            recipe = cursor.fetchone()
+            connection.close()
 
-            # Optionally, rotate the image before drawing
-            # Set parameters for the image (width, height, x, y)
-            image_width = 200
-            image_height = 200
-            x_position = 50
-            y_position = height - 300
+            if recipe:
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.set_font("Arial", size=12)
 
-            # Draw the image (flip vertically by adjusting Y position)
-            c.drawImage(image_path, x_position, y_position, width=image_width, height=image_height)
+                # Title
+                pdf.cell(200, 10, txt=recipe['title'], ln=True, align='C')
 
-            # Remove the temporary image after drawing
-            if os.path.exists("temp_image.png"):
-                os.remove("temp_image.png")
+                # Image
+                if recipe['image']:
+                    temp_image_path = f'temp_recipe_image_for_pdf_{self.recipe_id}.png'
+                    with open(temp_image_path, 'wb') as f:
+                        f.write(recipe['image'])
+                    image = PILImage.open(temp_image_path)
+                    image = image.resize((150, 150))
+                    image.save(temp_image_path)
+                    pdf.image(temp_image_path, x=80, y=20, w=50, h=50)
 
-        # Ingredients
-        c.setFont("Helvetica", 12)
-        c.drawString(50, height - 350, "Ingredients:")
-        c.drawString(50, height - 370, ingredients)
+                pdf.ln(60)  # Move below the image
 
-        # Steps
-        c.setFont("Helvetica", 12)
-        c.drawString(50, height - 400, "Steps:")
-        c.drawString(50, height - 420, steps)
+                # Ingredients, Steps, Cooking Time, and Serving Size
+                pdf.multi_cell(0, 10, txt=f"Ingredients:\n{recipe['ingredients']}")
+                pdf.multi_cell(0, 10, txt=f"Steps:\n{recipe['steps']}")
+                pdf.cell(0, 10, txt=f"Cooking Time: {recipe['cook_time']} mins", ln=True)
+                pdf.cell(0, 10, txt=f"Serving Size: {recipe['serving_size']}", ln=True)
 
-        # Serving Size
-        c.drawString(50, height - 450, f"Serving Size: {serving_size}")
+                app = App.get_running_app()
+                pdf_output_path = f"{app.username}_{recipe['title']}.pdf"
+                pdf.output(pdf_output_path)
+                print("Recipe PDF downloaded successfully!")
 
-        # Cook Time
-        c.drawString(50, height - 470, f"Cook Time: {cook_time}")
+                # Show popup notification
+                self.show_download_popup(pdf_output_path)
+        except Exception as e:
+            print(f"Error downloading recipe as PDF: {e}")
 
-        # Save the PDF
-        c.save()
-        print(f"PDF generated successfully: {pdf_filename}")
+    def show_download_popup(self, pdf_path):
+        """Show a popup notification when the PDF is successfully downloaded."""
+        content = BoxLayout(orientation='vertical', padding=10)
+        content.add_widget(Label(text=f"PDF successfully downloaded:\n{pdf_path}"))
+        close_btn = Button(text="Close", size_hint_y=None, height=40)
+        content.add_widget(close_btn)
 
+        popup = Popup(title="Download Complete", content=content, size_hint=(0.8, 0.5))
+        close_btn.bind(on_press=popup.dismiss)
+        popup.open()
+
+    def add_back_button(self):
+        back_btn = Button(text="Back", size_hint_y=None, height=40)
+        back_btn.bind(on_press=self.go_back)
+        self.layout.add_widget(back_btn)
+
+    def go_back(self, instance):
+        if self.manager:
+            self.manager.current = 'main_page'
+
+
+if __name__ == "__main__":
+    class MainApp(App):
+        user_id = 1
+        username = "test_user"
+
+        def build(self):
+            sm = ScreenManager()
+            view_recipe = ViewRecipe(name='view_recipe')
+            sm.add_widget(view_recipe)
+            view_recipe.set_recipe_id(1)
+            return sm
+
+
+    MainApp().run()

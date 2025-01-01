@@ -88,19 +88,6 @@ class LoginScreen(Screen):
             size_hint=(None, None),
             size=(dp(120), dp(20)),
         )
-        extra_options_layout.add_widget(remember_me)
-        extra_options_layout.add_widget(remember_label)
-
-        # Forgot Password Link
-        forgot_password_label = Label(
-            text="[u][color=2ecc71]Forgot Password?[/color][/u]",
-            markup=True,
-            halign="right",
-            valign="middle",
-            size_hint=(1, None),
-            height=dp(20),
-        )
-        extra_options_layout.add_widget(forgot_password_label)
 
         form_layout.add_widget(extra_options_layout)
 
@@ -148,24 +135,31 @@ class LoginScreen(Screen):
             return
 
         db = connect_to_db()
+        if db is None:
+            self.show_popup("Error", "Failed to connect to the database.")
+            return
+
         cursor = db.cursor()
-        cursor.execute("SELECT id, name, password FROM users WHERE email = %s", (email,))
-        result = cursor.fetchone()
+        try:
+            cursor.execute("SELECT id, name, password FROM users WHERE email = %s", (email,))
+            result = cursor.fetchone()
 
-        if result and bcrypt.checkpw(password.encode('utf-8'), result[2].encode('utf-8')):
-            # Store the user_id and username after successful login
-            user_id, username = result[0], result[1]
-            App.get_running_app().user_id = user_id  # Store the user_id in the app instance
-            App.get_running_app().username = username  # Store the username in the app instance
+            if result and bcrypt.checkpw(password.encode('utf-8'), result[2].encode('utf-8')):
+                # Store the user_id and username after successful login
+                user_id, username = result[0], result[1]
+                App.get_running_app().user_id = user_id  # Store the user_id in the app instance
+                App.get_running_app().username = username  # Store the username in the app instance
 
-            # Redirect to the main screen
-            self.manager.current = 'main_page'
-            print(f"Login successful! User ID: {user_id}, Username: {username}")
-        else:
-            self.show_popup("Invalid Credentials", "Incorrect email or password.")
-
-        cursor.close()
-        db.close()
+                # Redirect to the main screen
+                self.manager.current = 'main_page'
+                print(f"Login successful! User ID: {user_id}, Username: {username}")
+            else:
+                self.show_popup("Invalid Credentials", "Incorrect email or password.")
+        except mysql.connector.Error as err:
+            self.show_popup("Database Error", f"Error: {err}")
+        finally:
+            cursor.close()
+            db.close()
 
     def go_to_signup(self, instance):
         self.manager.current = "signup"
