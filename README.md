@@ -1,3 +1,8 @@
+Front end  - >Kivy
+Backend    -> Python
+Database   ->Mysql
+
+
 Yum share
 | Users |
 | 1.Authentication Screen |
